@@ -3,10 +3,12 @@ try:
     from .html_renderer import Renderer
     from . import utils
     from .html_parser import generate_html_item_from_html_file
+    from .layout_i18n import main as trans_main
 except Exception:
     from html_renderer import Renderer
     from html_parser import generate_html_item_from_html_file
     import utils
+    from layout_i18n import main as trans_main
 import subprocess
 import shutil
 import re
@@ -96,14 +98,14 @@ def split_list(obj, n):
 def parse_site_config(doc_src_path):
     site_config_path = os.path.join(doc_src_path, "site_config.json")
     def check_site_config(config):
-        configs = ["site_name", "site_slogon", "site_root_url", "site_domain", "site_protocol", "route", "executable", "plugins"]
+        configs = ["site_name", "site_slogon", "site_root_url", "site_domain", "site_protocol", "route", "plugins"]
         for c in configs:
             if not c in config:
                 return False, "need {} keys, see example docs".format(configs)
         if not site_config['site_root_url'].endswith("/"):
             site_config['site_root_url'] = "{}/".format(site_config['site_root_url'])
         return True, ""
-    site_config = load_config(doc_src_path, doc_src_path, config_name="site_config")    
+    site_config = load_config(doc_src_path, doc_src_path, config_name="site_config")
     ok, msg = check_site_config(site_config)
     if not ok:
         return False, "check site_config.json fail: {}".format(msg)
@@ -318,14 +320,16 @@ def generate_navbar_language_items(routes, doc_configs, addtion_items={}):
         locale = Locale.parse(doc_configs[url]["locale"])
         item = {
             "url": url,
-            "label": locale.language_name + (" " + locale.script_name if locale.script_name else "")
+            "label": locale.language_name + (" " + locale.script_name if locale.script_name else ""),
+            "comment": "language"
         }
         items.append(item)
     for url, locale in addtion_items.items():
         locale = Locale.parse(locale)
         item = {
             "url": url,
-            "label": locale.language_name + (" " + locale.script_name if locale.script_name else "")
+            "label": locale.language_name + (" " + locale.script_name if locale.script_name else ""),
+            "comment": "language"
         }
         items.append(item)
     return items
@@ -347,6 +351,27 @@ def update_navbar_language(navbar, nav_lang_items):
     navbar["items"] = new_items
     return navbar
 
+def update_navbar_language_urls(items, doc_url, page_url, not_found_urls):
+    '''
+        Add page url to language items
+        @param items [{'url': '/more/en/', 'label': 'English', 'comment': 'language'},
+                      {'url': '/more/', 'label': '中文 简体', 'comment': 'language'}]
+        @param doc_url  /more/
+        @param page_url /more/index.html
+        @param not_found_items {url: redirect_url}
+        @return [{'url': '/more/en/index.html', 'label': 'English', 'comment': 'language'},
+                 {'url': '/more/index.html', 'label': '中文 简体', 'comment': 'language'}]
+    '''
+    new_items = []
+    tail = page_url.replace(doc_url, "")
+    for item in items:
+        new = item.copy()
+        new["url"] += tail
+        if new["url"] in not_found_urls.keys():
+            new["url"] = not_found_urls[new["url"]]
+        new_items.append(new)
+    return new_items
+
 def get_sidebar_list(sidebar, doc_path, doc_url, log, redirect_err_file = False, redirct_url=f"no_translate.html", ref_doc_url="", add_file_item = True):
     '''
         @return {
@@ -363,8 +388,12 @@ def get_sidebar_list(sidebar, doc_path, doc_url, log, redirect_err_file = False,
                 "file_path": {
                     "curr": (url, label),
                 }
+            },
+            {
+                "not found url": "redirect_url"
             }
         '''
+        not_found_items = {}
         is_dir = "items" in config
         items = OrderedDict()
         if "label" in config and "file" in config and config["file"] != None and config["file"] != "null":
@@ -379,7 +408,9 @@ def get_sidebar_list(sidebar, doc_path, doc_url, log, redirect_err_file = False,
             if not os.path.exists(file_abs):
                 if redirect_err_file:
                     url_rel = utils.get_url_by_file_rel(config["file"], rel = True)
-                    url = f'{redirct_url}?ref={ref_doc_url}{url_rel}&from={url}'
+                    _url = f'{redirct_url}?ref={ref_doc_url}{url_rel}&from={url}'
+                    not_found_items[url] = _url
+                    url = _url
                 else:
                     log.w("file {} not found, but set in {} sidebar config file, maybe letter case wrong?".format(file_abs, doc_path))
             if file_abs.endswith("no_translate.md"):
@@ -393,11 +424,12 @@ def get_sidebar_list(sidebar, doc_path, doc_url, log, redirect_err_file = False,
                 items[file_abs]["file"] = config["file"]
         if is_dir:
             for item in config["items"]:
-                _items = get_sidebar_list(item, doc_path, doc_url, log, redirect_err_file = redirect_err_file, redirct_url=redirct_url, ref_doc_url=ref_doc_url)
+                _items, _not_found_items = get_sidebar_list(item, doc_path, doc_url, log, redirect_err_file = redirect_err_file, redirct_url=redirct_url, ref_doc_url=ref_doc_url)
                 items.update(_items)
-        return items
+                not_found_items.update(_not_found_items)
+        return items, not_found_items
 
-    dict_items = get_items(sidebar, doc_url)
+    dict_items, not_found_items = get_items(sidebar, doc_url)
     items = list(dict_items.items())
     length = len(items)
     for i, (path, item) in enumerate(items):
@@ -412,7 +444,7 @@ def get_sidebar_list(sidebar, doc_path, doc_url, log, redirect_err_file = False,
         if not "next" in item or not item["next"]:
             item["next"] = n
         dict_items[path]= item
-    return dict_items
+    return dict_items, not_found_items
 
 def generate_sidebar_html(htmls, sidebar, doc_path, doc_url, sidebar_title_html, redirect_err_file=False, redirct_url="", ref_doc_url=""):
     '''
@@ -459,11 +491,13 @@ def generate_sidebar_html(htmls, sidebar, doc_path, doc_url, sidebar_title_html,
                     "sub_indicator" if is_dir else ""
                 )
             elif "url" in config and config["url"] != None and config["url"] != "null":
-                li_item_html = '<li class="{} with_link"><a href="{}" {}><span class="label">{}</span><span class="{}"></span></a>'.format(
-                    "not_active",
+                target = config["target"].strip() if "target" in config else ""
+                li_item_html = '<li class="{} with_link"><a href="{}" {}><span class="label">{}</span>{}<span class="{}"></span></a>'.format(
+                    "not_active {}".format("ext_link" if target else ""),
                     config["url"],
-                    'target="{}"'.format(config["target"]) if "target" in config else "",
+                    'target="{}"'.format(target) if target else "",
                     config["label"],
+                    '<span class="ext_link_icon"></span>' if target == "_blank" else "",
                     "sub_indicator" if is_dir else ""
                 )
             elif not is_dir and level == 1:
@@ -520,7 +554,7 @@ def generate_sidebar_html(htmls, sidebar, doc_path, doc_url, sidebar_title_html,
         htmls[file] = html
     return htmls
 
-def generate_navbar_html(htmls, navbar, doc_path, doc_url, plugins_objs, log):
+def generate_navbar_html(htmls, navbar, doc_path, doc_url, plugins_objs, log, not_found_items = {}):
     '''
         @doc_path  doc path, contain config.json and sidebar.json
         @doc_url   doc url, config in "route" of site_config.json
@@ -558,6 +592,8 @@ def generate_navbar_html(htmls, navbar, doc_path, doc_url, plugins_objs, log):
                     config["url"] = "/{}".format(config["url"])
             _doc_url = doc_url+"/" if not doc_url.endswith("/") else doc_url
             _config_url = config["url"] + "/" if (not config["url"].endswith(".html") and not config["url"].endswith("/")) else config["url"]
+            if _config_url.endswith("index.html"):
+                _config_url = _config_url[:-10]
             # print(parent_item_type, _doc_url, _config_url, page_url)
             if _doc_url == "/":
                 if page_url == "/index.html" and _config_url == "/":       # / / /index.html
@@ -580,7 +616,10 @@ def generate_navbar_html(htmls, navbar, doc_path, doc_url, plugins_objs, log):
                 item_htmls = []
                 active_items = [None] * len(config["items"])
                 count = 0
-                for i, item in enumerate(config["items"]):
+                items = config["items"]
+                if len(config["items"]) > 0 and "language" in config["items"][0].get("comment", ""):
+                    items = update_navbar_language_urls(config["items"], doc_url, page_url, not_found_items)
+                for i, item in enumerate(items):
                     _active_class = active_class + "tmp"
                     item_html, _active_item = generate_items(item, doc_url, page_url, level = level + 1, parent_item_type = item_type, active_class= _active_class)
                     if _active_item:
@@ -615,10 +654,10 @@ def generate_navbar_html(htmls, navbar, doc_path, doc_url, plugins_objs, log):
                             sub_items_ul_html
                         )
         elif item_type == "selection":
-            li_html = '<li class="sub_items {}"><a {} href="{}">{}{}</a>{}'.format(
+            li_html = '<li class="sub_items {}"><a {} {}>{}{}</a>{}'.format(
                 active_class if active else '',
                 'target="{}"'.format(config["target"]) if "target" in config else "",
-                config["url"] if have_url else "", config["label"], active_item["label"] if active_item else "",
+                'href="{}"'.format(config["url"]) if have_url else "", config["label"], active_item["label"] if active_item else "",
                 sub_items_ul_html
             )
         else: # link
@@ -629,7 +668,7 @@ def generate_navbar_html(htmls, navbar, doc_path, doc_url, plugins_objs, log):
             )
         html = '{}</li>\n'.format(li_html)
         return html, active_item
-    
+
     def generate_lef_right_items(config, doc_url, page_url):
         left = '<ul id="nav_left">\n'
         right = '<ul id="nav_right">\n'
@@ -808,10 +847,6 @@ def construct_html(html_template, html_templates_i18n_dirs, htmls, header_items_
                     metadata.pop("keywords")
                 if "desc" in metadata:
                     metadata.pop("desc")
-                if "tags" in metadata:
-                    metadata.pop("tags")
-                if "id" in metadata:
-                    metadata.pop("id")
                 if "layout" in html["metadata"]:
                     html["metadata"]["layout"] = str(html["metadata"]["layout"])
                     if not html["metadata"]["layout"].endswith(".html"):
@@ -930,10 +965,10 @@ def update_html_abs_path(file_htmls, root_path):
             if content[6] == "/" and content[7] != "/": # href="/static/..."
                 content = "{}{}{}".format(content[:6], root_path[:-1], content[6:])
         elif content.startswith("url"):
-            if content[4] != "/" and content[5] == "/" and content[6] != "/": # url("/static/...")
-                content = "{}{}{}".format(content[:5], root_path[:-1], content[5:])
-            elif content[4] == "/" and content[5] != "/": # url(/static/...)
+            if content[4] == "/" and content[5] != "/": # url(/static/...)
                 content = "{}{}{}".format(content[:4], root_path[:-1], content[4:])
+            elif content[4] != "/" and len(content) > 6 and content[5] == "/" and content[6] != "/": # url("/static/...")
+                content = "{}{}{}".format(content[:5], root_path[:-1], content[5:])
         return content
 
     for path in file_htmls:
@@ -1045,7 +1080,8 @@ def generate_return(plugins_objs, ok, multiprocess):
 def generate(multiprocess, html_template, html_templates_i18n_dirs, files, url, dir, doc_config, plugin_func, routes,
              site_config, doc_src_path, log, out_dir, plugins_objs, header_items, js_items,
              sidebar, sidebar_list, allow_no_navbar, site_root_url, navbar, footer, queue, pipe_rx, pipe_tx,
-             redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue=None, sidebar_root_dir = None):
+             redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue=None, sidebar_root_dir = None,
+             not_found_items = {}):
     if not sidebar_root_dir:
         sidebar_root_dir = dir
     if pipe_tx is not None:
@@ -1084,6 +1120,7 @@ def generate(multiprocess, html_template, html_templates_i18n_dirs, files, url, 
             out_path = out_path[:-1]
         # call plugins to parse files
         result_htmls = {}
+        drafts = []
         for plugin in plugins_objs:
             # parse file content
             result = plugin.__getattribute__(plugin_func)(files)
@@ -1098,6 +1135,7 @@ def generate(multiprocess, html_template, html_templates_i18n_dirs, files, url, 
                             result_htmls[key] = result['htmls'][key]  # will cover the before
                         elif key not in result_htmls:
                             result_htmls[key] = None
+                    drafts.extend(result.get("drafts", []))
             if is_err():
                 return generate_return(plugins_objs, False, multiprocess)
         # parse html files
@@ -1112,7 +1150,7 @@ def generate(multiprocess, html_template, html_templates_i18n_dirs, files, url, 
             result_htmls.pop(file)
         # copy not parsed files
         for path in files:
-            if not path in result_htmls:
+            if path not in result_htmls and path not in drafts:
                 copy_file(path, path.replace(in_path, out_path))
         # no file parsed, just return
         if not result_htmls:
@@ -1129,7 +1167,7 @@ def generate(multiprocess, html_template, html_templates_i18n_dirs, files, url, 
             return generate_return(plugins_objs, False, multiprocess)
         # generate navbar to html
         if navbar:
-            htmls = generate_navbar_html(htmls, navbar, dir, url, plugins_objs, log)
+            htmls = generate_navbar_html(htmls, navbar, dir, url, plugins_objs, log, not_found_items = not_found_items)
         if footer:
             htmls = generate_footer_html(htmls, footer, dir, url, plugins_objs)
         if is_err():
@@ -1221,6 +1259,11 @@ def get_nav_translate_lang_items(doc_url, site_config, doc_src_path, config_temp
         lang_items = generate_navbar_language_items(routes, doc_configs, addtion_items={doc_url: config["locale"]})
     return lang_items
 
+def get_layout_root(doc_src_path, site_config):
+    layout_root = os.path.join(doc_src_path, site_config["layout_root_dir"]) if "layout_root_dir" in site_config else os.path.join(doc_src_path, "layout")
+    layout_root = os.path.abspath(layout_root).replace("\\", "/")
+    return layout_root
+
 def get_templates_i18n_dirs(site_config, doc_src_path, log):
     '''
         get template_i18n_dirs from site_config's  layout_i18n_dirs key, key canbe path str, or list
@@ -1232,7 +1275,8 @@ def get_templates_i18n_dirs(site_config, doc_src_path, log):
         if os.path.exists(dir):
             return dir
         return False
-    html_templates_i18n_dirs = []
+    layout_locales_dir = os.path.join(get_layout_root(doc_src_path, site_config), "locales")
+    html_templates_i18n_dirs = [layout_locales_dir] if os.path.exists(layout_locales_dir) else []
     if "layout_i18n_dirs" in site_config:
         if type(site_config["layout_i18n_dirs"]) == str:
             abs_dir = is_dir_valid(site_config["layout_i18n_dirs"], doc_src_path)
@@ -1342,7 +1386,6 @@ def parse(type_name, plugin_func, routes, routes_trans, site_config, doc_src_pat
         footer_js_items = []
         #     get html template from plugins
         html_template = None
-        html_templates_i18n_dirs = []
         for plugin in plugins_objs:
             items = plugin.on_add_html_header_items(type_name)
             _js_items = plugin.on_add_html_footer_js_items(type_name)
@@ -1369,7 +1412,7 @@ def parse(type_name, plugin_func, routes, routes_trans, site_config, doc_src_pat
 
         # preview_mode js file
         if preview_mode:
-            footer_js_items.append('<script type="text/javascript" src="{}static/js/live.js"></script>'.format(site_config['site_root_url']))
+            footer_js_items.append('<script type="text/javascript" src="/static/js/live.js"></script>')
 
         # get sidebar config
         sidebar_dict = {}
@@ -1397,14 +1440,17 @@ def parse(type_name, plugin_func, routes, routes_trans, site_config, doc_src_pat
         redirect_err_file = translate,
         redirct_url=f"{url}no_translate.html"
         if sidebar_dict:
-            sidebar_list = get_sidebar_list(sidebar_dict, dir, url, log,
+            sidebar_list, not_found_items = get_sidebar_list(sidebar_dict, dir, url, log,
                                 redirect_err_file = redirect_err_file,
                                 redirct_url=redirct_url,
                                 ref_doc_url = ref_doc_url)
+            # if not translate: # find all not translate yet items
+            #     not_found_items = get_not_trans_items(sidebar_dict, )
             if translate:
                 check_sidebar_diff(translate_src_sidebar_list, sidebar_list, ref_doc_url, url, ref_doc_dir, dir, doc_src_path, log)
         else:
             sidebar_list = {}
+            not_found_items = {}
         if max_threads_num > 1 and len(all_files) > 10:
             all_files = split_list(all_files, max_threads_num)
             ts = []
@@ -1419,7 +1465,8 @@ def parse(type_name, plugin_func, routes, routes_trans, site_config, doc_src_pat
                                             routes, site_config, doc_src_path, log, out_dir, plugins_objs,
                                             header_items, footer_js_items, sidebar_dict, sidebar_list, allow_no_navbar,
                                             site_root_url, navbar, footer, queue, pipe_rx_p2c, pipe_tx_c2p,
-                                            redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue)
+                                            redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue,
+                                            None, not_found_items)
                 if multiprocess:
                     p = multiprocessing.Process(target=generate, args=args)
                 else:
@@ -1452,7 +1499,7 @@ def parse(type_name, plugin_func, routes, routes_trans, site_config, doc_src_pat
             ok = generate(multiprocess, html_template, html_templates_i18n_dirs, all_files, url, dir, doc_config, plugin_func,
                           routes, site_config, doc_src_path, log, out_dir, plugins_objs, header_items,
                           footer_js_items, sidebar_dict, sidebar_list, allow_no_navbar, site_root_url, navbar, footer, queue, None, None,
-                          redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue)
+                          redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue, None, not_found_items)
             if not ok:
                 return False, None
         # create no_translate.html
@@ -1484,7 +1531,7 @@ def parse(type_name, plugin_func, routes, routes_trans, site_config, doc_src_pat
                 ok = generate(multiprocess, html_template, html_templates_i18n_dirs, all_files, url, tmp_dir, doc_config, plugin_func,
                           routes, site_config, doc_src_path, log, out_dir, plugins_objs, header_items,
                           footer_js_items, sidebar_dict, sidebar_list, allow_no_navbar, site_root_url, navbar, footer, queue, None, None,
-                          redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue, sidebar_root_dir=dir)
+                          redirect_err_file, redirct_url, ref_doc_url, is_build, layout_usage_queue, sidebar_root_dir=dir, not_found_items=not_found_items)
                 if not ok:
                     return False, None
         log.d("generate {} ok".format(dir))
@@ -1522,6 +1569,7 @@ def build(doc_src_path, config_template_dir, plugins_objs, site_config, out_dir,
     if not update_files:
         if not check_udpate_routes(site_config, doc_src_path, log):
             return False
+    trans_main("all", get_layout_root(doc_src_path, site_config), rm_meta=True)
     if parse_pages:
         # get html template i18n dir
         html_templates_i18n_dirs = get_templates_i18n_dirs(site_config, doc_src_path, log)
@@ -1565,7 +1613,7 @@ def build(doc_src_path, config_template_dir, plugins_objs, site_config, out_dir,
                         routes[dst["url"]] = dst["src"]
                     src_dir = site_config["route"]["docs"][src][1]
                     sidebar_dict = get_sidebar(src_dir, config_template_dir) # must be success
-                    sidebar_list = get_sidebar_list(sidebar_dict, src_dir, src, log)
+                    sidebar_list, not_found_items = get_sidebar_list(sidebar_dict, src_dir, src, log)
                     #    pase mannually translated files, and change links of sidebar items that no mannually translated file
                     ok, htmls_files2 = parse("doc", "on_parse_files", routes, {}, site_config, doc_src_path, config_template_dir, log, out_dir, plugins_objs,
                                 sidebar=True, allow_no_navbar=False, update_files=update_files, max_threads_num=max_threads_num, preview_mode=preview_mode,
@@ -1725,8 +1773,7 @@ def files_watch(doc_src_path, site_config, log, delay_time, queue, layout_usage_
                 files = [os.path.abspath(os.path.join(self.doc_src_path, event.src_path)).replace("\\", "/")]
                 self._append_files(files)
 
-    layout_root = os.path.join(doc_src_path, site_config["layout_root_dir"]) if "layout_root_dir" in site_config else os.path.join(doc_src_path, "layout")
-    layout_root = os.path.abspath(layout_root).replace("\\", "/")
+    layout_root = get_layout_root(doc_src_path, site_config)
     observer = Observer()
     handler = FileEventHandler(doc_src_path)
     files = os.listdir(doc_src_path)
@@ -1735,12 +1782,13 @@ def files_watch(doc_src_path, site_config, log, delay_time, queue, layout_usage_
     for name in files:
         if name in ignores:
             continue
-        observer.schedule(handler, os.path.join(doc_src_path, name), True)
+        observer.schedule(handler, os.path.join(doc_src_path, name), recursive = True)
     observer.start()
     try:
         while True:
             time.sleep(delay_time)
             update_files = handler.get_update_files()
+            # TODO: check translate po files change in layout_root/locales dir
             update_files = check_layout_usage(update_files, layout_root, layout_usages)
             if update_files:
                 log.i("file changes detected:", update_files)
@@ -1804,10 +1852,11 @@ def main():
     parser.add_argument("--thread", type=int, default=0, help="how many threads use to building, default 0 will use max CPU supported")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="host address for serve command")
     parser.add_argument("--port", type=int, default=2333, help="port for serve command")
-    parser.add_argument("-m", "--multiprocess", action="store_true", default=platform.system().lower() != 'windows', help="use multiple process instead of threads, default mutiple process in unix like systems" )
+    parser.add_argument("-m", "--multiprocess", action="store_true", default=not platform.system().lower().strip() in ['windows'], help="use multiple process instead of threads, default mutiple process in unix like systems" )
     parser.add_argument("--fast", action="store_true", default=False, help="fast build mode for serve command")
     parser.add_argument("--template", type=str, default=None, help="for init command, based on which template to create project", choices=list(templates.keys()))
-    parser.add_argument("command", choices=["install", "init", "build", "serve", "json2yaml", "yaml2json", "summary2yaml", "summary2json"])
+    parser.add_argument("--search-dir", type=str, default=None, help="local plugins search dir for install command, install plugins from local dir and ignore site_config plugin from keyword")
+    parser.add_argument("command", choices=["install", "init", "build", "serve", "json2yaml", "yaml2json", "summary2yaml", "summary2json", "translate"])
     args = parser.parse_args()
 
     if args.log_level == "d":
@@ -1864,6 +1913,13 @@ def main():
                 f2.write(yaml_str)
             log.i("convert yaml from gitbook summary complete, file at: {}".format(yaml_path))
         return 0
+    elif args.command == "translate":
+        ok, site_config = parse_site_config(args.dir)
+        if not ok:
+            log.e("site config parse error")
+            return 1
+        layout_root = get_layout_root(args.dir, site_config)
+        return trans_main("all", layout_root, rm_meta=True)
     elif args.command == "init":
         log.i("init doc now")
         if not os.path.exists(args.dir):
@@ -1951,9 +2007,12 @@ def main():
                         path = os.path.abspath(os.path.join(doc_src_path, path))
                     if os.path.exists(path):
                         sys.path.insert(0, path)
+                    if args.search_dir and os.path.exists(os.path.join(args.search_dir, plugin)):
+                        log.i(f"found local plugin in {os.path.join(args.search_dir, plugin)}")
+                        sys.path.insert(0, os.path.abspath(os.path.join(args.search_dir, plugin)))
                     plugin_import_name = plugin.replace("-", "_")
                     module = __import__(plugin_import_name)
-                    log.i(f"plugin version: {module.__version__}")
+                    log.i(f"== plugin {plugin} v{module.__version__} ==")
                     plugin_obj = module.Plugin(doc_src_path=doc_src_path, config=plugin_config, site_config=site_config, logger=log, multiprocess = args.multiprocess)
                     plugin_obj.module_path = os.path.abspath(os.path.dirname(module.__file__))
                     plugins_objs.append(plugin_obj)
@@ -1962,19 +2021,36 @@ def main():
                 log.i("install, source doc root path: {}".format(doc_src_path))
                 log.i("plugins: {}".format(list(site_config["plugins"].keys())))
                 curr_path = os.getcwd()
+                plugins_dir = None if args.search_dir == "." else args.search_dir
+                if plugins_dir and not os.path.exists(plugins_dir):
+                    log.e("plugins dir not exist: {}".format(plugins_dir))
+                    sys.exit(1)
                 for plugin, info in site_config['plugins'].items():
-                    path = info['from']
+                    path = info["from"]
+                    local_path = None
+                    if plugins_dir:
+                        local_path = utils.find_plugin_in_dir(plugins_dir, plugin)
+                    # force install from local source code
+                    if local_path:
+                        log.i("install plugin <{}> from {}".format(plugin, local_path))
+                        cmd = [f'"{sys.executable}"', "-m", "pip", "install", "--upgrade", local_path]
+                        p = subprocess.Popen(" ".join(cmd), shell=True)
+                        out, err_out, = p.communicate()
+                        if p.returncode != 0:
+                            log.e("install <{}> fail".format(plugin))
+                            return 1
+                        log.i("install <{}> complete".format(plugin))
                     # install from pypi.org
-                    if (not path) or path.lower() == "pypi":
+                    elif (not path) or path.lower() == "pypi":
                         if "version" in info:
                             plugin = f"{plugin}=={info['version']}"
                         log.i("install plugin <{}> from pypi.org".format(plugin))
                         if args.index_url:
-                            cmd = [site_config["executable"]["pip"], "install", "--upgrade", plugin, "-i", args.index_url]
+                            cmd = [f'"{sys.executable}"', "-m", "pip", "install", "--upgrade", plugin, "-i", args.index_url]
                         else:
-                            cmd = [site_config["executable"]["pip"], "install", "--upgrade", plugin]
-                        p = subprocess.Popen(cmd, shell=False)
-                        p.communicate()
+                            cmd = [f'"{sys.executable}"', "-m", "pip", "install", "--upgrade", plugin]
+                        p = subprocess.Popen(" ".join(cmd), shell=True)
+                        out, err_out, = p.communicate()
                         if p.returncode != 0:
                             log.e("install <{}> fail".format(plugin))
                             return 1
@@ -1982,10 +2058,10 @@ def main():
                     # install from git like: git+https://github.com/Neutree/COMTool.git#egg=comtool
                     elif path.startswith("svn") or path.startswith("git"):
                         log.i("install plugin <{}> from {}".format(plugin, path))
-                        cmd = [site_config["executable"]["pip"], "install", "-e", path]
+                        cmd = [f'"{sys.executable}"', "-m", "pip", "install", "-e", path]
                         log.i("install <{}> by pip: {}".format(plugin, " ".join(cmd)))
-                        p = subprocess.Popen(cmd, shell=False)
-                        p.communicate()
+                        p = subprocess.Popen(" ".join(cmd), shell=True)
+                        out, err_out, = p.communicate()
                         if p.returncode != 0:
                             log.e("install <{}> fail".format(plugin))
                             return 1

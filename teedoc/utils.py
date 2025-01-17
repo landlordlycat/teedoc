@@ -164,7 +164,7 @@ def update_config(old, update, level = 0, ignore=[]):
             # update item
             for i, item in enumerate(update[key]):
                 if "id" in item:
-                    if type(old_list_item[item["id"]]) == dict:
+                    if "id" in old_list_item and type(old_list_item[item["id"]]) == dict:
                         old_list_item[item["id"]] = update_config(old_list_item[item["id"]], item, level + 1)
                     else:
                         old_list_item[item["id"]] = item
@@ -349,6 +349,8 @@ def get_file_last_modify_time(file_path, git=True):
         if p.returncode == 0:
             date_str = output.decode("utf-8").strip()
             if date_str:
+                if date_str.endswith("Z"):
+                    date_str = date_str[:-1] + "+00:00"
                 last_edit_time = datetime.fromisoformat(date_str)
     if not last_edit_time: # this time is not accurate, just for outside of git repository's file
         last_edit_time = datetime.fromtimestamp(os.stat(file_path).st_mtime)
@@ -382,6 +384,16 @@ def get_sub_dirs(dir, trans_info):
             sub_dirs.append(d)
     return sub_dirs
 
+def find_plugin_in_dir(dir, name):
+    '''
+        @dir plugins dir
+        @name plugin name
+        @return plugin path or None
+    '''
+    for dir_name in os.listdir(dir):
+        if dir_name == name:
+            return os.path.join(dir, dir_name)
+    return None
 
 if __name__ == "__main__":
     a = {

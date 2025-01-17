@@ -12,12 +12,13 @@ except Exception:
     pass
 from teedoc import Plugin_Base
 from teedoc import Fake_Logger
+from .version import __version__
 try:
     from .jupyter_convert import convert_ipynb_to_html
 except Exception:
     from jupyter_convert import convert_ipynb_to_html
 
-__version__ = "1.3.4"
+
 class Plugin(Plugin_Base):
     name = "teedoc-plugin-jupyter-notebook-parser"
     desc = "jupyter notebook parser plugin for teedoc"
@@ -43,7 +44,8 @@ class Plugin(Plugin_Base):
         result = {
             "ok": False,
             "msg": "",
-            "htmls": OrderedDict()
+            "htmls": OrderedDict(),
+            "drafts": []
         }
         # function parse md file is disabled
         if not "ipynb" in self.config["parse_files"]:
@@ -63,6 +65,9 @@ class Plugin(Plugin_Base):
                 html = convert_ipynb_to_html(file)
                 html.body = self._update_link_html(html.body)
                 metadata = html.metadata
+                if metadata.get("draft", False):
+                    result["drafts"].append(file)
+                    continue
                 author = metadata.get("author", "")
                 date = None
                 ts = None

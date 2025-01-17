@@ -15,8 +15,8 @@ from teedoc import Plugin_Base
 from teedoc import Fake_Logger
 from teedoc.utils import update_config
 import copy
+from .version import __version__
 
-__version__ = "1.0.2"
 
 class Plugin(Plugin_Base):
     name = "teedoc-plugin-thumbs-up"

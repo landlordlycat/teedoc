@@ -11,8 +11,8 @@ except Exception:
     pass
 from teedoc import Plugin_Base
 from teedoc import Fake_Logger
+from .version import __version__
 
-__version__ = "1.22.1"
 
 class Plugin(Plugin_Base):
     name = "teedoc-plugin-theme-default"
@@ -248,7 +248,6 @@ class Plugin(Plugin_Base):
 
     def on_copy_files(self):
         res = self.files_to_copy
-        self.files_to_copy = {}
         return res
 
 

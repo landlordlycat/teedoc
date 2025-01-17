@@ -1,9 +1,16 @@
 import shutil
 from setuptools import setup, find_packages
 import os
-from teedoc import __version__
 from glob import glob
 import sys
+
+curr_dir = os.path.abspath(os.path.dirname(__file__))
+readme_path = os.path.join(curr_dir, "README.md")
+version_path = os.path.join(curr_dir, "teedoc", "version.py")
+require_path = os.path.join(curr_dir, "requirements.txt")
+
+with open(version_path) as f:
+    exec(f.read())
 
 print("generate locale files")
 # os.system("cd teedoc && ./trans_prepare.sh && ./trans_finish.sh")
@@ -13,24 +20,13 @@ exec(open("trans_finish.py").read())
 os.chdir("..")
 print("generate locale files complete")
 
-curr_dir = os.path.abspath(os.path.dirname(__file__))
-readme_path = os.path.join(curr_dir, "README.md")
 
 with open(readme_path, encoding="utf-8") as f:
      long_description = f.read()
 
-install_requires = [ "coloredlogs >= 15.0.1",
-                     "mistune >=2.0.3,<3",
-                     "watchdog >= 2.1.7",
-                     "nbconvert >= 7.0.0",
-                     "PyYaml >= 5.4.1",
-                     "jinja2 >= 3.1.1",
-                     "flask >= 2.0.2",
-                     "babel >= 2.9.1",
-                     "requests",
-                     "progress",
-                     "html2text"
-                   ]
+with open(require_path) as f:
+    install_requires = f.read().splitlines()
+
 packages = find_packages()
 print("packages:", packages)
 
@@ -74,7 +70,7 @@ delete_build()
 
 os.chdir("teedoc")
 tempalte_files = glob("templates/**", recursive=True)
-package_data_files = ['static/js/*', "locales/*/*/*.?o", "templates/*"]
+package_data_files = ['static/js/*', "locales/*/*/*.?o", "templates/*", "*.cfg"]
 package_data_files.extend(tempalte_files)
 print(package_data_files)
 os.chdir("..")
@@ -136,7 +132,9 @@ setup(
     # have to be included in MANIFEST.in as well.
     package_data={
         "teedoc" : package_data_files,
+        "": ["requirements.txt", "README*", "LICENSE"]
     },
+    include_package_data=True,
 
     # Although 'package_data' is the preferred approach, in some case you may
     # need to place data files outside of your packages. See:

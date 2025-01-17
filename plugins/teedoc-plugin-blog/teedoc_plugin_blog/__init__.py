@@ -12,8 +12,7 @@ except Exception:
 from teedoc import Plugin_Base
 from teedoc import Fake_Logger
 import tempfile, shutil, json
-import time
-import datetime
+from .version import __version__
 
 import mistune
 mistune_version = mistune.__version__.split(".") # 0.8.4, 2.0.0rc1
@@ -23,9 +22,6 @@ if os.path.exists(local_plugin_path):
     sys.path.insert(0, local_plugin_path)
 from teedoc.metadata_parser import Metadata_Parser
 from teedoc_plugin_markdown_parser.renderer import create_markdown_parser
-
-
-__version__ = "1.1.6"
 
 
 class Plugin(Plugin_Base):
